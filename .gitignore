@@ -41,8 +41,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Claude Code — local per-user settings (permissions, etc.)
+# Claude Code — local per-user settings and ephemeral worktrees
 .claude/settings.local.json
+.claude/worktrees/
 
 # Playwright
 /test-results/
