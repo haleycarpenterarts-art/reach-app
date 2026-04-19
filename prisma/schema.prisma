@@ -1,7 +1,6 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Reach — Prisma schema
+// Phase 1 minimum: Profile + AuditEvent. More models land in Phase 2-3.
+// See CLAUDE.md architectural rules and docs/rbac-matrix.md.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +9,87 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+// Connection URLs live in prisma.config.ts (Prisma 7 pattern).
+// Runtime queries use the DATABASE_URL via adapter passed to PrismaClient.
+// Prisma CLI (migrations) uses DIRECT_URL via prisma.config.ts datasource.url.
+
+// -----------------------------------------------------------------
+// Roles — aligns with docs/rbac-matrix.md §Role codes.
+// -----------------------------------------------------------------
+enum Role {
+  EXECUTIVE
+  OPS_ADMIN
+  PM
+  DESIGN_ENGINEER
+  ESTIMATOR
+  PROGRAMMER
+  WAREHOUSE
+  TECH_LEAD
+  TECH_USER
+  FINANCE
+  SALES
+  SERVICE
+}
+
+// -----------------------------------------------------------------
+// Profile — app-level user record.
+// id matches Supabase auth.users.id (no FK declared; auth schema is
+// managed by Supabase, not Prisma). A profile row is upserted on
+// first authenticated request.
+// -----------------------------------------------------------------
+model Profile {
+  id        String   @id @db.Uuid
+  email     String   @unique
+  fullName  String?
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditEvents AuditEvent[]
+
+  @@map("profiles")
+}
+
+// -----------------------------------------------------------------
+// AuditEvent — CLAUDE.md rule 8: audit log is not optional.
+// Append-only. Indexed for actor-, type-, and resource-based queries.
+// -----------------------------------------------------------------
+enum AuditEventType {
+  // Auth
+  SIGN_IN
+  SIGN_OUT
+  SIGN_IN_FAILED
+  MFA_ENROLL
+  MFA_CHALLENGE_PASS
+  MFA_CHALLENGE_FAIL
+
+  // Authorization
+  AUTHZ_DENIED
+
+  // Trusted-core (stubs — more added as modules land)
+  PERMISSION_GRANT_CHANGED
+  THRESHOLD_CHANGED
+  APPROVAL_RECORDED
+  STATE_TRANSITION
+  MONEY_CHANGE
+  CUSTOMER_DOC_RELEASED
+  STEP_UP_AUTH_REQUIRED
+  STEP_UP_AUTH_PASSED
+}
+
+model AuditEvent {
+  id           BigInt         @id @default(autoincrement())
+  type         AuditEventType
+  actorId      String?        @db.Uuid
+  actor        Profile?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  resourceType String?
+  resourceId   String?
+  metadata     Json           @default("{}")
+  occurredAt   DateTime       @default(now())
+
+  @@map("audit_events")
+  @@index([actorId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([resourceType, resourceId, occurredAt])
 }
