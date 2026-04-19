@@ -46,8 +46,6 @@ model Profile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  auditEvents AuditEvent[]
-
   @@map("profiles")
 }
 
@@ -78,11 +76,14 @@ enum AuditEventType {
   STEP_UP_AUTH_PASSED
 }
 
+// AuditEvent.actorId is intentionally a loose UUID pointer (no FK to
+// profiles.id). Industry best practice: audit records are append-only
+// and must never fail to write because of referential integrity with a
+// parent table. Queries that need actor details JOIN manually.
 model AuditEvent {
   id           BigInt         @id @default(autoincrement())
   type         AuditEventType
   actorId      String?        @db.Uuid
-  actor        Profile?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
   resourceType String?
   resourceId   String?
   metadata     Json           @default("{}")
