@@ -8,6 +8,8 @@ Runtime permission grants live in the `permission_grants` Postgres table and are
 
 See DECISIONS.md 2026-04-17 — RBAC admin-editable matrix architecture.
 
+**Roles are tenant-scoped.** Per DECISIONS.md 2026-08-22 — *Tenancy and identity* — role is carried on a per-tenant `Membership`, and the role set itself is a tenant-scoped table seeded from this file. It is no longer a Postgres enum. The twelve codes below are the **AV trade layer's seeded defaults**; a tenant may rename or add roles without a migration. See `docs/tenancy-model.md`.
+
 ## What is admin-editable vs hardcoded
 
 **Admin-editable via matrix UI (Owner sovereignty):**
@@ -100,6 +102,41 @@ System settings, user + role management, audit log access, MFA resets, secret/in
 | System settings (integrations, templates, defaults) | V E | V E | — | — | — | — | — | — | — | — | — | — |
 | View platform audit log | V S | V S | — | — | — | — | — | — | — | — | — | — |
 | Admin override (any record, audit-logged) | O | O | — | — | — | — | — | — | — | — | — | — |
+
+## 1a. Trade layer access
+
+Which trade layers a role may enter — `av.`, `elec.`, and so on. Per DECISIONS.md
+2026-08-22 — *Trade layers* — this is an ordinary permission in this matrix, not a
+separate entitlement subsystem.
+
+**The check is nested and both halves must pass:**
+
+1. The **tenant's enabled-trades list**, set at provisioning. A tenant that does not
+   have a trade has no rows, screens or vocabulary for it, for anyone, regardless of
+   grants below.
+2. The **role grant** in this table. The admin UI at `/admin/roles` only offers
+   trades the tenant actually has, so a grant can never be issued for a trade the
+   tenant lacks.
+
+Failing either is a plain deny-by-default authorization failure — same path and same
+`AUTHZ_DENIED` audit event as any other. The subdomain selects which trade layer is
+active; it never selects the tenant and never scopes data.
+
+| Action | EO | OA | PM | DE | ES | PR | WH | TL | TU | FB | SA | SS |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Enter a trade layer the tenant has enabled | V | V | V | V | V | V | V | V | V | V | V | V |
+| Manage the tenant's enabled-trades list | — | — | — | — | — | — | — | — | — | — | — | — |
+
+**Seed default is access to every trade the tenant has enabled**, for every role.
+Reach AV ships single-trade, so a restrictive default would be friction with no
+benefit on day one. A multi-trade tenant that wants its security technicians out of
+the AV layer restricts it in the admin UI — and because that is *weakening* a
+restriction in reverse, the reverse operation (re-granting) is the one that triggers
+step-up auth, consistent with every other cell in this matrix.
+
+**Managing the enabled-trades list is nobody's grant in v1.** It is provisioning-time
+state set outside the tenant, not a tenant-editable setting. There is no billing
+subsystem in v1, and this row is the seam entitlement will attach to when there is.
 
 ## 2. Library (master data)
 

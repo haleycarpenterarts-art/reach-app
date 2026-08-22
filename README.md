@@ -17,6 +17,7 @@ Production-grade system, built with production discipline. See:
 
 - [docs/principles.md](./docs/principles.md) — **the ten principles, the layer model, the adjudication sequence.** Governs what may be built. Read before any structural work.
 - [docs/product-model.md](./docs/product-model.md) — what Reach is, the container model, brand architecture
+- [docs/tenancy-model.md](./docs/tenancy-model.md) — identity, tenancy and trade layers; the model the schema is built on
 - [CLAUDE.md](./CLAUDE.md) — architectural rules, build workflow, agent and skill index
 - [SPEC.md](./SPEC.md) — canonical functional specification
 - [PHASES.md](./PHASES.md) — build plan with entry/exit criteria per phase

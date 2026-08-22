@@ -14,6 +14,8 @@ This is a production system. Build it with production discipline, not prototype 
 
 `docs/product-model.md` holds what Reach is — the container model, brand architecture, and how the AV trade layer sits over the core. Read it alongside the principles.
 
+`docs/tenancy-model.md` holds the identity, tenancy and trade-layer model the schema is built on. Read it before any work touching users, roles, permissions, the data model, session or middleware.
+
 The architectural rules below are consistent with both and more specific. Where they ever conflict, the principles win and the conflict is a decision to log.
 
 **The doctrine files are mirrors.** `docs/principles.md` and `docs/product-model.md` are maintained from a private doctrine record outside this repository. Amendments are authored there, dated, and mirrored here — never edited here first. The repo copies are authoritative *for the repo*; divergence beyond the omitted provenance material is a defect, not a variant.
@@ -86,7 +88,7 @@ These are enforced across the whole codebase. Flag any violation rather than rat
 
 9. **AI output is a suggestion until a user accepts it.** Extraction, auto-classification, diagram generation, and scope drafting produce *proposed* records. They do not become authoritative until a user with appropriate rights confirms them.
 
-10. **Tenancy is structural.** Every table carries tenant scope from its first migration and ships with a row-level security policy. `lib/authz/` keeps every business rule it holds — roles, SoD, sensitive fields, approval authority. RLS exists for one thing only: a tenant can never read another tenant's rows. A table without a policy is a defect, not an increment. Tenancy is never retrofitted. See `DECISIONS.md` 2026-08-22.
+10. **Tenancy is structural.** Every table carries tenant scope from its first migration and ships with a row-level security policy. `lib/authz/` keeps every business rule it holds — roles, SoD, sensitive fields, approval authority. RLS exists for one thing only: a tenant can never read another tenant's rows. A table without a policy is a defect, not an increment. Tenancy is never retrofitted. **A tenant is a business, not a business-and-trade pairing** — one dataset per business, with trade layers over it. Identity is global; role is carried on a per-tenant membership. The active tenant lives in the server session and is never accepted from the client. See `docs/tenancy-model.md` and `DECISIONS.md` 2026-08-22.
 
 11. **A record opens before it is complete.** A project is creatable the moment work is taken on, with whatever is known at that moment. No `NOT NULL` on a field that may be unknown when a commitment is made, no required fields at creation, no validation that prevents saving, and no draft or pre-project state that holds real work outside the model until it qualifies. Missing is a state the system represents — a tracked open question with a shape — not an error it rejects, and not a blank indistinguishable from a fact nobody needed. See `docs/principles.md` Principle 8.
 

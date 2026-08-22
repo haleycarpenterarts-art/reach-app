@@ -38,8 +38,12 @@ The phase structure follows the confidence-zone model from `CLAUDE.md`: foundati
 
 ### Deliverables
 
-- Authentication and user management (managed provider).
-- Role model with least-privilege defaults.
+- Tenancy foundation: `Tenant`, `Identity`, `Membership`, tenant-scoped `roles`. Replaces `Profile` and the `Role` enum. See `docs/tenancy-model.md`.
+- `tenant_id` and a row-level security policy on every table, including `audit_events`. Prisma connects as a non-superuser role setting tenant context per request.
+- Session and middleware: cookie scoped to `.reach-systems.app`, server-held active tenant, subdomain-to-trade resolution, tenant switching.
+- Authentication and user management (managed provider), with an enumeration-safe invite flow.
+- Role model with least-privilege defaults, resolved from the active membership.
+- Trade layer access as an RBAC permission, nested under the tenant’s enabled-trades list.
 - Server-side authorization on every protected resource (`lib/authz/`).
 - Audit logging for all high-value actions (`lib/audit/`).
 - Shared status model (`Draft / Ready / Approved / In progress / On hold / Complete`) and transition control framework.
@@ -49,6 +53,11 @@ The phase structure follows the confidence-zone model from `CLAUDE.md`: foundati
 ### Exit criteria
 
 - Every route is either explicitly public or goes through `lib/authz/`.
+- Tenant isolation verified by querying as the other tenant — through the app and directly through the Prisma connection role. Reading the policy does not count.
+- A member whose tenant lacks a trade, and a member whose role lacks the trade grant, are both denied at that trade’s subdomain and emit `AUTHZ_DENIED`.
+- Tenant switching re-derives permissions with no client-supplied tenant id.
+- Invite, sign-up and password reset return identical responses for known and unknown emails.
+- Deactivating a member leaves every audit event they produced still attributed.
 - Money logic has automated tests covering cost, sell, labor, tax, markup, margin, and rollup — including edge cases for rounding and zero-quantity lines.
 - Audit events for authentication, authorization failures, approvals, state transitions, money-changing actions, and permission changes are all emitted and queryable.
 - Snapshot mechanism verified: issuing a version captures pricing and content at that moment; later Library changes do not mutate issued snapshots.
