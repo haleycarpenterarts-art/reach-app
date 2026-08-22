@@ -1,6 +1,18 @@
 // Reach — Prisma schema
-// Phase 1 minimum: Profile + AuditEvent. More models land in Phase 2-3.
-// See CLAUDE.md architectural rules and docs/rbac-matrix.md.
+//
+// Tenancy foundation. See docs/tenancy-model.md for the model this implements
+// and DECISIONS.md 2026-08-22 for why. The three axes are independent:
+//
+//   Identity     a human            from the Supabase auth session
+//   Tenant       a business         from the SERVER SESSION only
+//   Trade layer  AV, LV, security   from the subdomain
+//
+// A tenant is a business, not a business-and-trade pairing. One dataset per
+// business; trades are layers over it. The subdomain selects the trade layer
+// and never the tenant and never the data scope.
+//
+// Every tenant-scoped table carries tenantId and ships with an RLS policy in
+// its migration — CLAUDE.md rule 10. A table without one is a defect.
 
 generator client {
   provider = "prisma-client"
@@ -15,45 +27,185 @@ datasource db {
 // Prisma CLI (migrations) uses DIRECT_URL via prisma.config.ts datasource.url.
 
 // -----------------------------------------------------------------
-// Roles — aligns with docs/rbac-matrix.md §Role codes.
+// Trade — the set of trade layers that exist on the platform.
+//
+// This IS an enum, deliberately, and the reasoning is the inverse of the
+// Role case below. A trade layer cannot exist without code: its vocabulary,
+// workflows, document types and screens are built once, per vertical. Adding
+// a value here is a release — which is exactly what the layer model says a
+// trade-layer change is.
+//
+// Only AV is built. The others are declared so the enabled-trades mechanism
+// is testable and a multi-trade tenant is representable from day one.
 // -----------------------------------------------------------------
-enum Role {
-  EXECUTIVE
-  OPS_ADMIN
-  PM
-  DESIGN_ENGINEER
-  ESTIMATOR
-  PROGRAMMER
-  WAREHOUSE
-  TECH_LEAD
-  TECH_USER
-  FINANCE
-  SALES
-  SERVICE
+enum Trade {
+  AV
+  LOW_VOLTAGE
+  SECURITY
+  ELECTRICAL
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum IdentityStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
 }
 
 // -----------------------------------------------------------------
-// Profile — app-level user record.
-// id matches Supabase auth.users.id (no FK declared; auth schema is
-// managed by Supabase, not Prisma). A profile row is upserted on
-// first authenticated request.
+// Tenant — a business. One dataset per row.
+//
+// A business running AV, low voltage and security under one roof is ONE
+// tenant with three TenantTrade rows, sharing one customer record. That is
+// a first-class case, not an edge case.
 // -----------------------------------------------------------------
-model Profile {
-  id        String   @id @db.Uuid
-  email     String   @unique
+model Tenant {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  trades      TenantTrade[]
+  roles       Role[]
+  memberships Membership[]
+  auditEvents AuditEvent[]
+
+  @@map("tenants")
+}
+
+// -----------------------------------------------------------------
+// TenantTrade — which trade layers this tenant is entitled to.
+//
+// Set at provisioning. There is no billing subsystem in v1; this table is
+// the seam entitlement will attach to when there is one, which is why it is
+// a table with provisioning metadata rather than an array column.
+//
+// This is the FIRST half of the trade-access check. The second half is a
+// per-role grant in the RBAC matrix (docs/rbac-matrix.md §1a), which lands
+// with permission_grants and is NOT in this migration. Until it does, only
+// tenant-level entitlement is enforceable.
+// -----------------------------------------------------------------
+model TenantTrade {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  trade     Trade
+  enabledAt DateTime @default(now())
+
+  @@unique([tenantId, trade])
+  @@map("tenant_trades")
+}
+
+// -----------------------------------------------------------------
+// Identity — one row per human, platform-wide. 1:1 with auth.users.id.
+//
+// email is unique GLOBALLY, and this is the only global uniqueness
+// constraint in the schema. Everything else is scoped to a tenant.
+//
+// Carries no role, no tenant, no permissions — those live on Membership,
+// because the same person holds different roles in different businesses.
+//
+// NEVER deleted. Deactivated instead, so audit authorship survives a
+// departure. There is no deletedAt column, and that is deliberate.
+// -----------------------------------------------------------------
+model Identity {
+  id        String         @id @db.Uuid
+  email     String         @unique
   fullName  String?
-  role      Role
+  status    IdentityStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  memberships Membership[]
+
+  @@map("identities")
+}
+
+// -----------------------------------------------------------------
+// Membership — one row per (identity, tenant). Carries the role.
+//
+// This is where role lives. Not on Identity: a person is not the same
+// seniority everywhere, and role is a fact about their relationship to one
+// business rather than a global fact about a human.
+// -----------------------------------------------------------------
+model Membership {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  identityId  String           @db.Uuid
+  identity    Identity         @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  roleId      String           @db.Uuid
+  role        Role             @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  status      MembershipStatus @default(INVITED)
+  invitedAt   DateTime         @default(now())
+  activatedAt DateTime?
+  suspendedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([tenantId, identityId])
+  @@index([identityId, status])
+  @@index([tenantId, status])
+  @@map("memberships")
+}
+
+// -----------------------------------------------------------------
+// Role — tenant-scoped. NOT a Postgres enum.
+//
+// The layer model puts roles and permissions in the tenant layer:
+// configuration, no code. A tenant renaming a role or adding one must not
+// require a migration and a deploy.
+//
+// Seeded per tenant from docs/rbac-matrix.md §Role codes. The twelve AV
+// codes are the AV trade layer's seeded DEFAULTS — correct content, now in
+// an expression the tenant can change.
+//
+// isSystem marks a seeded row. V1 is grants-only per DECISIONS.md
+// 2026-04-17, so custom role creation is not exposed yet; the column exists
+// so that when it is, seeded and custom roles are distinguishable.
+// -----------------------------------------------------------------
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  isSystem  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  auditEvents AuditEvent[]
+  memberships Membership[]
 
-  @@map("profiles")
+  @@unique([tenantId, code])
+  @@map("roles")
 }
 
 // -----------------------------------------------------------------
-// AuditEvent — CLAUDE.md rule 8: audit log is not optional.
-// Append-only. Indexed for actor-, type-, and resource-based queries.
+// AuditEvent — CLAUDE.md rule 8: the audit log is not optional.
+//
+// Append-only, enforced at the database by a trigger in this migration
+// rather than by convention — a log the application can silently rewrite
+// fails in a way nobody notices.
+//
+// actorId references Identity, which is never deleted, and actor email and
+// name are denormalised at write time. Between them, authorship survives a
+// departure, a rename and a deactivation. The previous shape nulled the
+// actor out of every row a deleted profile had ever produced.
+//
+// tenantId is NULLABLE on purpose: sign-in failures and other platform-level
+// events happen before any tenant is resolved. Null-tenant rows are reachable
+// only by the service role, never through a tenant RLS policy.
 // -----------------------------------------------------------------
 enum AuditEventType {
   // Auth
@@ -66,6 +218,16 @@ enum AuditEventType {
 
   // Authorization
   AUTHZ_DENIED
+
+  // Tenancy
+  TENANT_SWITCHED
+  MEMBERSHIP_INVITED
+  MEMBERSHIP_ACTIVATED
+  MEMBERSHIP_SUSPENDED
+  MEMBERSHIP_ROLE_CHANGED
+  IDENTITY_DEACTIVATED
+  TENANT_TRADE_ENABLED
+  TENANT_TRADE_DISABLED
 
   // Trusted-core (stubs — more added as modules land)
   PERMISSION_GRANT_CHANGED
@@ -81,14 +243,18 @@ enum AuditEventType {
 model AuditEvent {
   id           BigInt         @id @default(autoincrement())
   type         AuditEventType
+  tenantId     String?        @db.Uuid
+  tenant       Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   actorId      String?        @db.Uuid
-  actor        Profile?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail   String?
+  actorName    String?
   resourceType String?
   resourceId   String?
   metadata     Json           @default("{}")
   occurredAt   DateTime       @default(now())
 
   @@map("audit_events")
+  @@index([tenantId, occurredAt])
   @@index([actorId, occurredAt])
   @@index([type, occurredAt])
   @@index([resourceType, resourceId, occurredAt])

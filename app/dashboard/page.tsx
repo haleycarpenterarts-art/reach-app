@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 
 export default async function DashboardPage() {
-  const { email, profile } = await requireAuth();
+  const { email, identityId, memberships } = await requireAuth();
 
   return (
     <main className="mx-auto max-w-2xl p-6 space-y-6">
@@ -17,12 +17,23 @@ export default async function DashboardPage() {
             <span className="text-muted-foreground">Email:</span> {email}
           </p>
           <p>
-            <span className="text-muted-foreground">Role:</span> {profile.role}
+            <span className="text-muted-foreground">Identity ID:</span>{" "}
+            <code className="text-xs">{identityId}</code>
           </p>
-          <p>
-            <span className="text-muted-foreground">Profile ID:</span>{" "}
-            <code className="text-xs">{profile.id}</code>
-          </p>
+          <div>
+            <span className="text-muted-foreground">Memberships:</span>{" "}
+            {memberships.length === 0 ? (
+              <span>none — this identity has not been added to a business yet</span>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {memberships.map((m) => (
+                  <li key={m.id}>
+                    {m.tenant.name} — {m.role.name}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </CardContent>
       </Card>
 
