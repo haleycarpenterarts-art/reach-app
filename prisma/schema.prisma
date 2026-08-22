@@ -69,7 +69,7 @@ enum MembershipStatus {
 // a first-class case, not an edge case.
 // -----------------------------------------------------------------
 model Tenant {
-  id        String       @id @default(uuid()) @db.Uuid
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
   slug      String       @unique
   status    TenantStatus @default(ACTIVE)
@@ -97,7 +97,7 @@ model Tenant {
 // tenant-level entitlement is enforceable.
 // -----------------------------------------------------------------
 model TenantTrade {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId  String   @db.Uuid
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   trade     Trade
@@ -140,7 +140,7 @@ model Identity {
 // business rather than a global fact about a human.
 // -----------------------------------------------------------------
 model Membership {
-  id          String           @id @default(uuid()) @db.Uuid
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId    String           @db.Uuid
   tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   identityId  String           @db.Uuid
@@ -176,7 +176,7 @@ model Membership {
 // so that when it is, seeded and custom roles are distinguishable.
 // -----------------------------------------------------------------
 model Role {
-  id        String   @id @default(uuid()) @db.Uuid
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId  String   @db.Uuid
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   code      String

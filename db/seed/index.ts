@@ -1,6 +1,12 @@
+import { config as loadEnv } from "dotenv";
 import { PrismaClient } from "@/lib/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { provisionTenant } from "./provision";
+
+// tsx does not load .env files. Same convention as scripts/backup.ts:
+// .env.local takes precedence so local overrides work without editing .env.
+loadEnv({ path: ".env" });
+loadEnv({ path: ".env.local", override: true });
 
 /**
  * Development seed.
@@ -22,7 +28,15 @@ async function main() {
     throw new Error("Refusing to seed: NODE_ENV is production.");
   }
 
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    // Without this the adapter silently falls back to localhost and fails
+    // with ECONNREFUSED, which reads like a database problem rather than a
+    // missing variable.
+    throw new Error("DATABASE_URL is not set. Copy .env.example to .env.local.");
+  }
+
+  const adapter = new PrismaPg({ connectionString });
   const prisma = new PrismaClient({ adapter });
 
   try {
