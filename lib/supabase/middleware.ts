@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { tradeFromHost } from "@/lib/tenancy/trade";
 
 /**
  * Session-refresh + auth gate + MFA enforcement.
@@ -31,8 +32,23 @@ function isMfaPath(pathname: string): boolean {
   return pathname.startsWith(MFA_PREFIX);
 }
 
+export const TRADE_HEADER = "x-reach-trade";
+
 export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  // Resolve the trade layer from the subdomain and hand it downstream as a
+  // request header. This is a REQUEST for a trade layer, not a grant: whether
+  // the caller may use it is decided by the tenant's enabled-trades list and
+  // the role's grant, never by the hostname. It carries no tenant and no data
+  // scope. See docs/tenancy-model.md.
+  //
+  // Strip any inbound copy first — otherwise a client could set the header
+  // itself and skip the parse.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.delete(TRADE_HEADER);
+  const trade = tradeFromHost(request.headers.get("host"));
+  if (trade) requestHeaders.set(TRADE_HEADER, trade);
+
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,7 +62,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          supabaseResponse = NextResponse.next({ request });
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
           );

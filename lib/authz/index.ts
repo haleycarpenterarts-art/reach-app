@@ -4,6 +4,7 @@ import { createClient as createSupabaseServerClient } from "@/lib/supabase/serve
 import { prisma } from "@/lib/prisma";
 import type { Identity, Membership, Role, Tenant } from "@/lib/generated/prisma/client";
 import { emit } from "@/lib/audit";
+import { getActiveTenant } from "@/lib/tenancy/active-tenant";
 
 export type ActiveMembership = Membership & {
   tenant: Tenant;
@@ -89,20 +90,28 @@ export async function requireAuth(): Promise<AuthedContext> {
 /**
  * Resolves the ACTIVE TENANT for tenant-scoped work.
  *
- * The active tenant lives in the server session and is never accepted from the
- * client — not from a header, a query parameter, a browser-readable cookie, or
- * the subdomain. The subdomain selects the trade layer and carries no
- * authority.
+ * The active tenant comes from the server-side selection in
+ * active_tenant_selections, re-validated against a live ACTIVE membership on
+ * every call. It is never accepted from the client — not from a header, a
+ * query parameter, a browser-readable cookie, or the subdomain. The subdomain
+ * selects the trade layer and carries no authority.
  *
- * STEP 4 of docs/tenancy-model.md replaces the resolution below with a real
- * server-session read plus a tenant switcher. Until then this handles only the
- * unambiguous case and REFUSES to guess:
+ *   no active membership          -> redirect; there is nothing to show
+ *   one, or a valid stored choice -> that tenant
+ *   several and nothing chosen    -> throws TenantSelectionRequired
  *
- *   no active membership -> redirect; there is nothing to show
- *   exactly one          -> that tenant
- *   more than one        -> throws, because picking one would be a guess, and
- *                           a guessed tenant is a cross-tenant read
+ * The last case is not an error condition, it is an unanswered question. It
+ * throws rather than picking because picking would be a guess, and a guessed
+ * tenant is a cross-tenant read. A tenant switcher answers it; until that UI
+ * exists, callers that can hit this must handle it.
  */
+export class TenantSelectionRequired extends Error {
+  constructor(public readonly choices: { tenantId: string; tenantName: string }[]) {
+    super("Several tenants available and none selected.");
+    this.name = "TenantSelectionRequired";
+  }
+}
+
 export async function requireTenant(): Promise<TenantContext> {
   const ctx = await requireAuth();
 
@@ -116,14 +125,25 @@ export async function requireTenant(): Promise<TenantContext> {
     redirect("/sign-in");
   }
 
-  if (ctx.memberships.length > 1) {
-    throw new Error(
-      "Multiple active memberships and no session tenant selection. " +
-        "Tenant switching is step 4 of docs/tenancy-model.md; refusing to guess a tenant.",
+  const active = await getActiveTenant(ctx.identityId);
+
+  if (!active) {
+    throw new TenantSelectionRequired(
+      ctx.memberships.map((m) => ({ tenantId: m.tenantId, tenantName: m.tenant.name })),
     );
   }
 
-  const membership = ctx.memberships[0];
+  const membership = ctx.memberships.find((m) => m.tenantId === active.tenantId);
+  if (!membership) {
+    // getActiveTenant validated the membership itself, so this means the two
+    // reads disagreed — a revocation landing between them. Deny, do not repair.
+    await emit({
+      type: "AUTHZ_DENIED",
+      actorId: ctx.identityId,
+      metadata: { reason: "membership_vanished_mid_request", tenantId: active.tenantId },
+    });
+    redirect("/sign-in");
+  }
 
   return {
     ...ctx,

@@ -79,7 +79,8 @@ model Tenant {
   trades      TenantTrade[]
   roles       Role[]
   memberships Membership[]
-  auditEvents AuditEvent[]
+  auditEvents      AuditEvent[]
+  activeSelections ActiveTenantSelection[]
 
   @@map("tenants")
 }
@@ -127,7 +128,8 @@ model Identity {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  memberships Membership[]
+  memberships     Membership[]
+  activeSelection ActiveTenantSelection?
 
   @@map("identities")
 }
@@ -189,6 +191,32 @@ model Role {
 
   @@unique([tenantId, code])
   @@map("roles")
+}
+
+// -----------------------------------------------------------------
+// ActiveTenantSelection — which tenant this person is currently working in.
+//
+// Server-held. The client never carries the active tenant; it carries only the
+// auth session that says who is asking. See docs/tenancy-model.md.
+//
+// Keyed by identity, so the selection follows the person across devices rather
+// than per browser session. Deliberate simplification — per-tab switching would
+// need a server-side session store keyed on something stable per browser, which
+// a stateless JWT does not provide.
+//
+// Never trusted alone. Every read re-validates that an ACTIVE membership still
+// exists for the pair, so a revoked membership takes effect on the next
+// request rather than whenever this row is tidied up.
+// -----------------------------------------------------------------
+model ActiveTenantSelection {
+  identityId String   @id @db.Uuid
+  identity   Identity @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  selectedAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("active_tenant_selections")
 }
 
 // -----------------------------------------------------------------

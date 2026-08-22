@@ -83,3 +83,28 @@ export async function withTenant<T>(
     return fn(tx);
   });
 }
+
+/**
+ * Run identity-scoped work with row-level security in force, but no tenant.
+ *
+ * The pre-tenant window: reading which memberships someone has, and which
+ * tenant they last selected. Both are needed BEFORE a tenant is known, so they
+ * cannot run under withTenant — a tenant-scoped policy would be circular.
+ *
+ * Policies that key on app.current_identity_id() apply; every tenant-scoped
+ * policy sees a NULL tenant and returns nothing. So this is strictly weaker
+ * than withTenant, never wider: it can reach your own memberships and your own
+ * selection, and no tenant's data at all.
+ *
+ * Same limitation as withTenant on deliberate escalation — see above.
+ */
+export async function withIdentity<T>(
+  identityId: string,
+  fn: (tx: TenantClient) => Promise<T>,
+): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.identity_id', ${identityId}, true)`;
+    await tx.$executeRawUnsafe("SET LOCAL ROLE app_user");
+    return fn(tx);
+  });
+}
