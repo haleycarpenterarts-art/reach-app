@@ -1,12 +1,23 @@
-# Reach
+# Reach AV
 
-Internal operating system for an AV integrator — lead → estimate → design → handoff → purchasing → field execution → commissioning → closeout → training → service.
+The audio-visual vertical of **Reach** — a multi-tenant workflow product for small trade
+businesses, built by Reach Systems, LLC.
+
+Covers the full project lifecycle: lead → estimate → design → handoff → purchasing → field
+execution → commissioning → closeout → training → service.
 
 ## What this repo is
 
-Production-grade internal business system, built with production discipline. See:
+Reach AV is the first product in the Reach line, not a pilot for a generic core. A tenant is
+an AV integration business, typically 10–20 users at $5–10M/yr. Requirements throughout this
+repo are the **AV trade layer** — not one customer's configuration. Values that vary between
+integrators belong in tenant configuration, never hardcoded.
 
-- [CLAUDE.md](./CLAUDE.md) — architectural rules, build workflow, skill index
+Production-grade system, built with production discipline. See:
+
+- [docs/principles.md](./docs/principles.md) — **the ten principles, the layer model, the adjudication sequence.** Governs what may be built. Read before any structural work.
+- [docs/product-model.md](./docs/product-model.md) — what Reach is, the container model, brand architecture
+- [CLAUDE.md](./CLAUDE.md) — architectural rules, build workflow, agent and skill index
 - [SPEC.md](./SPEC.md) — canonical functional specification
 - [PHASES.md](./PHASES.md) — build plan with entry/exit criteria per phase
 - [DECISIONS.md](./DECISIONS.md) — decision log (ADRs) + open questions
@@ -58,5 +69,6 @@ Per [CLAUDE.md](./CLAUDE.md) architectural rules — strict layer separation.
 - `lib/ingest/` — AI extraction pipeline
 - `jobs/` — background workers
 - `tests/` — unit, integration, e2e
-- `docs/` — architecture decision records + seed artifacts
+- `docs/` — product doctrine, architecture decision records, seed artifacts
+- `.claude/agents/` — scoped subagents (see [CLAUDE.md](./CLAUDE.md))
 - `.claude/skills/` — on-demand skills for domain-specific work

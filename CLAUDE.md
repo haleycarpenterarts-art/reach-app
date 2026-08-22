@@ -1,8 +1,22 @@
 # CLAUDE.md
 
-Internal business operating system for an AV integrator. Serves ~10–20 users across a $5–10M/yr business. Covers the full project lifecycle: lead → estimate → design → handoff → purchasing → field execution → commissioning → closeout → training → service.
+**Reach AV** — the audio-visual vertical of Reach, a multi-tenant workflow product for small trade businesses. Covers the full project lifecycle: lead → estimate → design → handoff → purchasing → field execution → commissioning → closeout → training → service.
 
-This is a real production system for internal use. Build it with production discipline, not prototype discipline. See `SPEC.md` for the functional truth and `PHASES.md` for the build plan.
+A tenant is an AV integration business, typically 10–20 users at $5–10M/yr. The requirements throughout this repo were drawn from operating a business of that shape — they are the **AV trade layer**, not one customer's configuration. Values that vary between integrators (margin floors, deposit customs, approval ceilings) belong in tenant configuration, never hardcoded.
+
+This is a production system. Build it with production discipline, not prototype discipline. See `docs/principles.md` for the invariants that govern what may be built, `SPEC.md` for the functional truth, and `PHASES.md` for the build plan.
+
+## The principles govern
+
+`docs/principles.md` holds ten principles, the core/trade/tenant layer model, and an adjudication sequence for change requests. They are not style guidance — they constrain what may be built. A change that breaks one does not get made because it was reasonable; the principle is amended first, in writing, dated in `DECISIONS.md`.
+
+**Read `docs/principles.md` before any structural work.** Do not answer from memory of it.
+
+`docs/product-model.md` holds what Reach is — the container model, brand architecture, and how the AV trade layer sits over the core. Read it alongside the principles.
+
+The architectural rules below are consistent with both and more specific. Where they ever conflict, the principles win and the conflict is a decision to log.
+
+**The doctrine files are mirrors.** `docs/principles.md` and `docs/product-model.md` are maintained from a private doctrine record outside this repository. Amendments are authored there, dated, and mirrored here — never edited here first. The repo copies are authoritative *for the repo*; divergence beyond the omitted provenance material is a defect, not a variant.
 
 ## Stack
 
@@ -56,7 +70,7 @@ These are enforced across the whole codebase. Flag any violation rather than rat
    - Data access layer (`db/`) is the only place `@prisma/client` is imported.
    - Integrations (auth, storage, queues, email, AI) are isolated behind adapters in `lib/` so the rest of the system does not depend on vendor SDKs.
 
-2. **Project Card is the operational center.** Every billable action, every execution record, every project artifact attaches to a Project Card. Do not create standalone unscoped records for things that belong to a project.
+2. **Project Card is the operational center.** Every commitment the business takes on gets a Project Card — billable work, warranty, rework and goodwill alike. Every execution record and project artifact attaches to one. Do not create standalone unscoped records for things that belong to a project, and do not introduce a lighter ticket or service-call entity to hold unbilled work. See `docs/principles.md` Principle 2, and `DECISIONS.md` 2026-08-22.
 
 3. **Library is the master data source.** Products, SKUs, pricing, standards, and room templates live in the Library. Projects *consume from* the Library; they do not duplicate master data inside themselves.
 
@@ -71,6 +85,16 @@ These are enforced across the whole codebase. Flag any violation rather than rat
 8. **Audit log is not optional.** Authentication events, authorization failures, approvals, state transitions, money-changing actions, permission changes, and customer document releases all emit audit events via `lib/audit/`.
 
 9. **AI output is a suggestion until a user accepts it.** Extraction, auto-classification, diagram generation, and scope drafting produce *proposed* records. They do not become authoritative until a user with appropriate rights confirms them.
+
+10. **Tenancy is structural.** Every table carries tenant scope from its first migration and ships with a row-level security policy. `lib/authz/` keeps every business rule it holds — roles, SoD, sensitive fields, approval authority. RLS exists for one thing only: a tenant can never read another tenant's rows. A table without a policy is a defect, not an increment. Tenancy is never retrofitted. See `DECISIONS.md` 2026-08-22.
+
+11. **A record opens before it is complete.** A project is creatable the moment work is taken on, with whatever is known at that moment. No `NOT NULL` on a field that may be unknown when a commitment is made, no required fields at creation, no validation that prevents saving, and no draft or pre-project state that holds real work outside the model until it qualifies. Missing is a state the system represents — a tracked open question with a shape — not an error it rejects, and not a blank indistinguishable from a fact nobody needed. See `docs/principles.md` Principle 8.
+
+12. **One dataset. No second place a fact can live.** No table that duplicates another for reporting, analytics, or convenience. No archive table, cold store, or separate historical schema — data lives with the project for the life of the record, and archive is a state, not a destination. No integration that mirrors records rather than referencing them. If two places could disagree about a fact, stop and report it. See `docs/principles.md` Principles 3 and 4.
+
+13. **Universal primitives first, trade layer second, tenant configuration third.** Every business collects the same primitives — items, inventory, categories, customers, locations, addresses, invoices, quantities, hours. Build those as core tables. The AV trade layer specialises and names them in the trade's language; it does not replace them. A requirement that appears to need a new primitive is usually describing an existing one differently — say so rather than adding a table. See `docs/principles.md` Principle 4.
+
+14. **Perspective is a filter, not a screen someone built.** The lens model ships as a filter over one dataset, not as a fixed set of views. If answering a new question requires development work, the model has been implemented wrong — indistinguishable on launch day, and failing at the first question nobody anticipated. See `docs/principles.md` Principles 1 and 4.
 
 ## Confidence zones
 
@@ -103,9 +127,23 @@ These shape every workflow:
 - **Prefer editing the skill to embedding context in a prompt.** If you find yourself re-explaining a rule across sessions, that rule belongs in `CLAUDE.md` or the relevant skill.
 - **Ask before inventing stack decisions.** Anything marked TBD in this file or in `DECISIONS.md` is not for you to pick silently — surface it.
 
+## Agents
+
+Agents live in `.claude/agents/`, each pinned to the smallest model that can do the job. Route work to them rather than doing it in the main thread.
+
+| Agent | Model | Does |
+|---|---|---|
+| `principle-check` | sonnet | Places a change in a layer, or names the invariant it breaks. Runs before anything structural is built. |
+| `verifier` | sonnet | Blind pass/fail with evidence, against the running system. Never the agent that did the work. |
+| `locator` | haiku | `file:line` references, nothing else |
+
 ## Skills
 
-The following skills live under `.claude/skills/` and load on demand. Invoke the relevant one before working in its area:
+The following skills live under `.claude/skills/` and load on demand. Invoke the relevant one before working in its area.
+
+`feature-build` is the process skill and runs alongside whichever domain skill applies — adjudicate, schema, implement, verify, report. Use it for any change touching structure, data, or behaviour.
+
+Domain skills:
 
 - `trusted-core` — auth, permissions, money, approvals, audit, snapshots
 - `project-card` — card structure, sections, role-specific views
